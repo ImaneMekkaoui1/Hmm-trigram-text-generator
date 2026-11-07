@@ -68,7 +68,7 @@ async def main():
             # Click Tab 2: Viterbi Tagger
             print("Switching to Tab 2 (Tagger)...")
             await cdp_call(ws, "Runtime.evaluate", {
-                "expression": "const el = Array.from(document.querySelectorAll('button, div, p, span')).find(e => e.innerText && e.innerText.trim() === '🏷️ Interactive Viterbi Tagger'); if (el) el.click();"
+                "expression": "const el = Array.from(document.querySelectorAll('button, div, p, span')).find(e => e.innerText && e.innerText.trim() === 'Interactive Viterbi Tagger'); if (el) el.click();"
             })
             await asyncio.sleep(2)
 

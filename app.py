@@ -2,9 +2,10 @@
 Run: streamlit run app.py
 """
 import io
-import math
+import os
 import random
-from collections import Counter
+import re
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -12,6 +13,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+# Ensure base directory is in sys.path
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 from src.pipeline import (
     HMM,
@@ -24,7 +30,6 @@ from src.pipeline import (
 
 st.set_page_config(
     page_title="Chaotic Text Generator - HMM vs Trigram Test Bench",
-    page_icon="🧪",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -32,7 +37,8 @@ st.set_page_config(
 # ------------------------------------------------------------------ Model Caching
 @st.cache_resource
 def load_all():
-    docs = load_tagged("data/corpus.csv")
+    corpus_path = os.path.join(BASE_DIR, "data", "corpus.csv")
+    docs = load_tagged(corpus_path)
     train, test = split_by_document(docs)
     hmm_plain = HMM(train, split_states=False)
     hmm_split = HMM(train, split_states=True)
@@ -60,7 +66,7 @@ train = data["train"]
 train_patterns = data["train_patterns"]
 
 # ------------------------------------------------------------------ Header & Notice
-st.title("🧪 Chaotic Text Generator — HMM & Trigram Test Bench")
+st.title("Chaotic Text Generator — HMM & Trigram Test Bench")
 st.markdown(
     "A sequence modeling and generation test bench comparing a **first-order Hidden Markov Model (HMM)**, "
     "a **role-split HMM (S / O / P)**, and a **trigram language model** with temperature sampling and Viterbi decoding."
@@ -68,12 +74,12 @@ st.markdown(
 
 # Mandatory Notice (Requirement 6)
 st.warning(
-    "⚠️ **Corpus Notice:** The corpus is synthetic and the grammar is tiny. "
+    "**Corpus Notice:** The corpus is synthetic and the grammar is tiny. "
     "Metrics such as valid tag pattern are defined relative to this corpus and do not measure the quality of real English."
 )
 
 # ------------------------------------------------------------------ Sidebar Control Panel (Requirement 1)
-st.sidebar.header("⚙️ Control Panel")
+st.sidebar.header("Control Panel")
 
 model_choice = st.sidebar.selectbox(
     "Select Model",
@@ -111,7 +117,7 @@ num_sentences = st.sidebar.slider(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
-    "**Corpus Stats:**  \n"
+    "**Corpus Statistics:**  \n"
     f"- Training sentences: **{len(train)}**  \n"
     f"- Vocabulary size: **{len(hmm_plain.vocab)}** words  \n"
     f"- POS tags: **{len(hmm_plain.tags)}** ({', '.join(hmm_plain.tags)})  \n"
@@ -120,7 +126,7 @@ st.sidebar.markdown(
 
 # ------------------------------------------------------------------ Main Interface Tabs
 tab_gen, tab_tagger, tab_compare, tab_grammar = st.tabs(
-    ["🚀 Text Generation & Batch Metrics", "🏷️ Interactive Viterbi Tagger", "📊 Model Comparison & Plots", "📖 Grammar & Transition Heatmap"]
+    ["Text Generation & Batch Metrics", "Interactive Viterbi Tagger", "Model Comparison & Plots", "Grammar & Transition Heatmap"]
 )
 
 # ------------------------------------------------------------------ TAB 1: Generation & Metrics
@@ -129,7 +135,7 @@ with tab_gen:
 
     col_btn, col_info = st.columns([1, 4])
     with col_btn:
-        generate_clicked = st.button("⚡ Generate Batch", type="primary", use_container_width=True)
+        generate_clicked = st.button("Generate Batch", type="primary", use_container_width=True)
 
     # Use session state to persist generated results
     if generate_clicked or "batch_results" not in st.session_state:
@@ -142,26 +148,22 @@ with tab_gen:
                 for _ in range(num_sentences):
                     words, states = hmm_plain.sample_with_states(rng, temperature)
                     samples.append((words, states))
-                    hidden_states_list.append(" → ".join(states))
+                    hidden_states_list.append(" -> ".join(states))
             elif model_choice == "Role-Split HMM":
                 for _ in range(num_sentences):
                     words, states = hmm_split.sample_with_states(rng, temperature)
                     coarse_tags = [s.split("_")[0] for s in states]
                     samples.append((words, coarse_tags))
-                    hidden_states_list.append(" → ".join(states))
+                    hidden_states_list.append(" -> ".join(states))
             else:  # Trigram
                 for _ in range(num_sentences):
                     words = ngram.sample_sentence(rng, temperature)
-                    # Infer hidden tags via role-split Viterbi tagger for metrics
                     tags = hmm_split.viterbi(words)
                     samples.append((words, tags))
-                    hidden_states_list.append(" → ".join(tags))
+                    hidden_states_list.append(" -> ".join(tags))
 
-            # Compute 4 key metrics (Requirement 3)
-            # Use role-split HMM as reference tagger for consistency
             batch_metrics = generation_metrics(samples, train, hmm_split)
 
-            # Build DataFrame (Requirement 2)
             rows = []
             for i, ((words, tags), h_states) in enumerate(zip(samples, hidden_states_list), 1):
                 sent_str = " ".join(words)
@@ -171,7 +173,7 @@ with tab_gen:
                     "ID": i,
                     "Sentence": sent_str,
                     "Hidden Tag Sequence": h_states,
-                    "Valid Pattern": "✅ Valid" if is_valid else "❌ Invalid",
+                    "Valid Pattern": "Valid" if is_valid else "Invalid",
                     "_valid_bool": is_valid,
                 })
 
@@ -184,7 +186,7 @@ with tab_gen:
     # Display Metrics Cards (Requirement 3)
     if "batch_metrics" in st.session_state:
         m = st.session_state["batch_metrics"]
-        st.markdown("### 📈 Batch Quality Metrics (N = {})".format(len(st.session_state["batch_results"])))
+        st.markdown("### Batch Quality Metrics (N = {})".format(len(st.session_state["batch_results"])))
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(
             label="Valid Tag Pattern",
@@ -211,17 +213,16 @@ with tab_gen:
 
         # Display Generated Table (Requirement 2)
         df_display = st.session_state["batch_results"]
-        st.markdown(f"### 📋 Generated Sentences ({len(df_display)} rows)")
+        st.markdown(f"### Generated Sentences ({len(df_display)} rows)")
 
-        # Filter option
         show_filter = st.radio(
             "Filter rows:",
-            options=["All Sentences", "Valid Only (✅)", "Invalid Only (❌)"],
+            options=["All Sentences", "Valid Only", "Invalid Only"],
             horizontal=True,
         )
-        if show_filter == "Valid Only (✅)":
+        if show_filter == "Valid Only":
             filtered_df = df_display[df_display["_valid_bool"] == True]
-        elif show_filter == "Invalid Only (❌)":
+        elif show_filter == "Invalid Only":
             filtered_df = df_display[df_display["_valid_bool"] == False]
         else:
             filtered_df = df_display
@@ -236,7 +237,7 @@ with tab_gen:
         csv_buffer = io.StringIO()
         df_display[["ID", "Sentence", "Hidden Tag Sequence", "Valid Pattern"]].to_csv(csv_buffer, index=False)
         st.download_button(
-            label="📥 Download Generated Sentences as CSV",
+            label="Download Generated Sentences as CSV",
             data=csv_buffer.getvalue(),
             file_name=f"generated_{st.session_state['current_model'].replace(' ', '_').lower()}_T{st.session_state['current_T']}.csv",
             mime="text/csv",
@@ -245,10 +246,10 @@ with tab_gen:
 
 # ------------------------------------------------------------------ TAB 2: Viterbi Tagger (Requirement 4)
 with tab_tagger:
-    st.subheader("🏷️ Interactive Sequence Labelling with Viterbi Algorithm")
+    st.subheader("Interactive Sequence Labelling with Viterbi Algorithm")
     st.markdown(
         "Type any English sentence below. The Viterbi dynamic programming decoder computes the most probable "
-        "part-of-speech tag sequence in log-space with add-k smoothing ($k = 0.01$)."
+        "part-of-speech tag sequence in log-space with add-k smoothing (k = 0.01)."
     )
 
     tagger_model_choice = st.radio(
@@ -273,19 +274,19 @@ with tab_tagger:
         user_input = st.text_input("Sentence to tag:", value="the girls watch the dogs in the park .")
 
     if user_input.strip():
-        # Clean & tokenize sentence
-        tokens = user_input.strip().lower().split()
+        # Clean & tokenize sentence with punctuation separation
+        tokens = re.findall(r"[\w']+|[.,!?;]", user_input.strip().lower())
         
         # Check for unknown / out-of-vocabulary words
         unknown_words = [w for w in tokens if w not in active_tagger.vocab]
 
         if unknown_words:
             st.warning(
-                f"⚠️ **Out-of-Vocabulary (OOV) Warning:** The word(s) `{', '.join(unknown_words)}` "
-                f"were not seen in the training vocabulary. Viterbi tags them using add-k smoothed emission probabilities ($P(w|t) = k / (count(t) + k \\cdot V)$)."
+                f"**Out-of-Vocabulary (OOV) Warning:** The word(s) `{', '.join(unknown_words)}` "
+                f"were not seen in the training vocabulary. Viterbi tags them using add-k smoothed emission probabilities: P(w | t) = k / (count(t) + k * |V|)."
             )
         else:
-            st.success("✅ All words are in the training vocabulary.")
+            st.success("All words are in the training vocabulary.")
 
         # Compute Viterbi decoding without crashing
         try:
@@ -320,30 +321,30 @@ with tab_tagger:
             pattern_str = " ".join(predicted_tags)
             is_valid = pattern_str in train_patterns
             if is_valid:
-                st.info(f"✨ **Syntactic Pattern:** `{pattern_str}` matches a known training grammar pattern.")
+                st.info(f"**Syntactic Pattern:** `{pattern_str}` matches a known training grammar pattern.")
             else:
-                st.warning(f"⚠️ **Syntactic Pattern:** `{pattern_str}` is unseen in the training grammar.")
+                st.warning(f"**Syntactic Pattern:** `{pattern_str}` is unseen in the training grammar.")
 
             # Ambiguity highlight for "watch"
             if "watch" in tokens:
                 idx = tokens.index("watch")
                 w_tag = predicted_tags[idx]
                 st.markdown(
-                    f"💡 **Ambiguity Resolution for 'watch':** In this sentence, *'watch'* is decoded as **{w_tag}**."
+                    f"**Ambiguity Resolution for 'watch':** In this context, *'watch'* is decoded as **{w_tag}**."
                 )
 
         except Exception as e:
             st.error(f"Error during Viterbi decoding: {e}")
 
-# ------------------------------------------------------------------ TAB 3: Model Comparison & Plots (Optional Requirements)
+# ------------------------------------------------------------------ TAB 3: Model Comparison & Plots
 with tab_compare:
-    st.subheader("📊 Comparative Benchmark: Plain HMM vs Role-Split HMM vs Trigram")
+    st.subheader("Comparative Benchmark: Plain HMM vs Role-Split HMM vs Trigram")
     st.markdown(
         "Compare all three models evaluated under identical conditions (same random seed, same sample size, multiple temperatures)."
     )
 
-    if st.button("🔄 Run Full Comparison Benchmark (T = 0.5, 1.0, 1.5, 2.5)"):
-        with st.spinner("Evaluating all models across 4 temperatures (500 sentences each)..."):
+    if st.button("Run Full Comparison Benchmark (T = 0.5, 1.0, 1.5, 2.5)"):
+        with st.spinner("Evaluating all models across 4 temperatures (300 sentences each)..."):
             comp_rows = []
             temps = [0.5, 1.0, 1.5, 2.5]
             plot_data = {"Plain HMM": [], "Role-Split HMM": [], "Trigram": []}
@@ -385,8 +386,7 @@ with tab_compare:
         st.line_chart(plot_df)
 
     else:
-        # Precomputed reference table from guide
-        st.markdown("#### Reference Benchmark Table ($T = 1.0$, $N = 500$):")
+        st.markdown("#### Reference Benchmark Table (T = 1.0, N = 500):")
         ref_data = {
             "Model": ["Plain HMM", "Role-Split HMM", "Trigram (3-gram)"],
             "Valid Tag Pattern": ["16.2%", "100.0%", "57.0%"],
@@ -396,17 +396,14 @@ with tab_compare:
         }
         st.table(pd.DataFrame(ref_data))
 
-        # Static reference bar chart
         st.markdown("#### Pre-computed Evaluation Summary:")
-        if st.checkbox("Show saved results chart (`results/hmm_results.png`)"):
-            try:
-                st.image("results/hmm_results.png", caption="Evaluation results: Transition Matrix & Valid Patterns")
-            except Exception:
-                pass
+        img_chart_path = os.path.join(BASE_DIR, "results", "hmm_results.png")
+        if os.path.exists(img_chart_path) and st.checkbox("Show saved results chart (results/hmm_results.png)"):
+            st.image(img_chart_path, caption="Evaluation results: Transition Matrix & Valid Patterns")
 
 # ------------------------------------------------------------------ TAB 4: Grammar & Transition Matrix Heatmap
 with tab_grammar:
-    st.subheader("📖 Grammar Rules & Transition Matrix Heatmap")
+    st.subheader("Grammar Rules & Transition Matrix Heatmap")
     st.markdown(
         "The synthetic corpus is generated from 16 canonical tag patterns. "
         "A first-order HMM with plain states mixes pre-verbal subject nouns and post-verbal object nouns, causing broken grammar. "
